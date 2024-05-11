@@ -1,9 +1,9 @@
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <vector>
 #include <queue>
 #include <set>
-#include <cassert>
 
 class Time final
 {
@@ -11,9 +11,22 @@ public:
 	int hours;
 	int minutes;
 	
-	Time(std::ifstream& inFile);
 	Time(int hours = 0, int minutes = 0) : hours(hours), minutes(minutes) {}
-	std::string Get();
+	
+	std::string Print()
+	{
+		std::string out;	
+		if (this->hours < 10)
+			out += '0';
+		out += std::to_string(this->hours);
+	
+		out += ':';
+	
+		if (this->minutes < 10)
+			out += '0';
+		out += std::to_string(this->minutes);
+		return out;
+	}
 	
 	bool operator<(const Time& other) const
 	{
@@ -24,19 +37,8 @@ public:
 		return false;
     }
 };
-
-class Event final
-{
-public:
-	Time time;
-	int ID;
-	std::string name;
-	int deskNumber;	
-
-	bool Set(std::ifstream& inFile);
-	Event(const Time& time = Time(), int ID = 0, const std::string& name = "Empty", int deskNumber = -1) : time(time), ID(ID), name(name), deskNumber(deskNumber) {}
-	std::string Get();
-};
+bool InvalidOpenCloseTime(const std::string& currentLine);
+bool InvalidEventTime(const std::string& currentLine);
 
 class Desk final
 {
@@ -46,6 +48,9 @@ public:
 	std::string client;
 	bool taken;
 	int money;
+	
+	Desk(const Time& startedUsingTime = Time(), const Time& allUsageTime = Time(), const std::string& client = "Empty", bool taken = false, int money = 0) :
+		startedUsingTime(startedUsingTime), allUsageTime(allUsageTime), client(client), taken(taken), money(money) {}
 	
 	void AddTime(const Time& currentSessionTime, int hourCost)
 	{	
@@ -59,9 +64,88 @@ public:
 		this->allUsageTime.hours   = intAllUsageTime / 60;
 		this->allUsageTime.minutes = intAllUsageTime % 60;
 	}
+};
+bool AllDesksTaken(const std::vector<Desk>& desks);
+
+class Event final
+{
+public:
+	Time time;
+	int ID;
+	std::string name;
+	int deskNumber;	
 	
-	Desk(const Time& startedUsingTime = Time(), const Time& allUsageTime = Time(), const std::string& client = "Empty", bool taken = false, int money = 0) :
-		startedUsingTime(startedUsingTime), allUsageTime(allUsageTime), client(client), taken(taken), money(money) {}
+	Event(const Time& time = Time(), int ID = 0, const std::string& name = "Empty", int deskNumber = -1) : time(time), ID(ID), name(name), deskNumber(deskNumber) {}
+	
+	Event(const std::string& currentLine, int nDesks)
+	{
+		if (InvalidEventTime(currentLine))
+		{
+			std::cout << currentLine << std::endl;
+			abort();
+		}
+		
+		std::istringstream iss(currentLine);
+		char delimiter;
+		iss >> this->time.hours >> delimiter >> this->time.minutes;
+		iss >> this->ID;
+		if (this->ID < 1 || this->ID > 4)
+		{
+			std::cout << currentLine << std::endl;
+			abort();
+		}
+		
+		iss >> this->name;
+		if (!this->name.length())
+		{
+			std::cout << currentLine << std::endl;
+			abort();
+		}
+		
+		for (char c: this->name)
+			if (!(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == ' ' || c == '-'))
+			{
+				std::cout << currentLine << std::endl;
+				abort();
+			}
+	
+		std::string deskNumberString;
+		iss >> deskNumberString;	
+		if (this->ID == 2)
+		{
+			if (!deskNumberString.length())
+			{
+				std::cout << currentLine << std::endl;
+				abort();
+			}
+			this->deskNumber = std::stoi(deskNumberString);
+		}
+		else
+			this->deskNumber = -1;
+		
+		
+		if (this->deskNumber < -1 || this->deskNumber > nDesks)
+		{
+			std::cout << currentLine << std::endl;
+			abort();
+		} 
+	}
+	
+	std::string Print()
+	{
+		std::string out;	
+		out += this->time.Print();
+		out += ' ';
+		out += std::to_string(this->ID);
+		out += ' ';
+		out += this->name;
+		if (this->ID == 2 || this->ID == 12)
+		{
+			out += ' ';
+			out += std::to_string(this->deskNumber);
+		}
+		return out;
+	}
 };
 
 class ComputerClub
@@ -70,14 +154,6 @@ public:
 	std::queue<std::string> waitingClients;
 	std::set<std::string> 	clients;
 };
-
-bool AllDesksTaken(const std::vector<Desk>& desks)
-{
-	for (int i = 0; i < desks.size(); ++i)
-		if (!desks[i].taken)
-			return false; 
-	return true;
-}
 
 int main(int argc, char* argv[])
 {
@@ -98,23 +174,66 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 	
-	int NDesks;
-	InFile >> NDesks;
-
+	std::string CurrentLine;
+	std::getline(InFile, CurrentLine);
+	if (!std::isdigit(CurrentLine[0]))
+	{
+		std::cout << CurrentLine << std::endl;
+		return 1;
+	}
+	int NDesks = std::stoi(CurrentLine);
+	if (NDesks <= 0)
+	{
+		std::cout << CurrentLine << std::endl;
+		return 1;
+	}
+	
 	std::vector<Desk> Desks(NDesks);
+
+	std::getline(InFile, CurrentLine);
+	if (InvalidOpenCloseTime(CurrentLine))
+	{
+		std::cout << CurrentLine << std::endl;
+		return 1;
+	}
 	
-	Time OpenTime(InFile);
-	Time CloseTime(InFile);
+	int OpenHours    = (CurrentLine[0] - '0') * 10 + (CurrentLine[1] - '0');
+	int OpenMinutes  = (CurrentLine[3] - '0') * 10 + (CurrentLine[4] - '0');
+	int CloseHours   = (CurrentLine[6] - '0') * 10 + (CurrentLine[7] - '0');
+	int CloseMinutes = (CurrentLine[9] - '0') * 10 + (CurrentLine[10] - '0');
 	
-	int HourCost;
-	InFile >> HourCost;
+	Time OpenTime(OpenHours, OpenMinutes);
+	Time CloseTime(CloseHours, CloseMinutes);
 	
-	std::cout << OpenTime.Get() << std::endl;
+	if (CloseTime < OpenTime)
+	{
+		std::cout << CurrentLine << std::endl;
+		return 1;
+	}
+	
+	std::getline(InFile, CurrentLine);
+	if (!std::isdigit(CurrentLine[0]))
+	{
+		std::cout << CurrentLine << std::endl;
+		return 1;
+	}
+	int HourCost = std::stoi(CurrentLine);
+	if (HourCost <= 0)
+	{
+		std::cout << CurrentLine << std::endl;
+		return 1;
+	}
+	
+	std::cout << OpenTime.Print() << std::endl;
 	
 	std::vector<Event> Events;
-	Event CurrentEvent;
-	while(CurrentEvent.Set(InFile))
+	while(true)
 	{
+		std::getline(InFile, CurrentLine);
+		if (!CurrentLine.length())
+			break;
+		
+		Event CurrentEvent(CurrentLine, NDesks);
 		bool error = false;
 		Events.push_back(CurrentEvent);
 		switch (CurrentEvent.ID)
@@ -237,72 +356,62 @@ int main(int argc, char* argv[])
 		}
 	
 	for (Event CurrentEvent: Events)
-		std::cout << CurrentEvent.Get() << std::endl;
+		std::cout << CurrentEvent.Print() << std::endl;
 	
-	std::cout << CloseTime.Get() << std::endl;	
+	std::cout << CloseTime.Print() << std::endl;	
 	
 	
 	for (int i = 0; i < Desks.size(); ++i)
-		std::cout << i + 1 << " " << Desks[i].money << " " << Desks[i].allUsageTime.Get() << std::endl;
+		std::cout << i + 1 << " " << Desks[i].money << " " << Desks[i].allUsageTime.Print() << std::endl;
 	
 	
 	InFile.close();
 }
 
-Time::Time(std::ifstream& inFile)
+bool AllDesksTaken(const std::vector<Desk>& desks)
 {
-    char delimiter;
-    inFile >> this->hours >> delimiter >> this->minutes;
-}
-
-std::string Time::Get()
-{
-	std::string out;	
-	if (this->hours < 10)
-		out += '0';
-	out += std::to_string(this->hours);
-	
-	out += ':';
-	
-	if (this->minutes < 10)
-		out += '0';
-	out += std::to_string(this->minutes);
-	return out;
-}
-
-bool Event::Set(std::ifstream& inFile)
-{
-    this->time = Time(inFile);
-	inFile >> this->ID;
-	
-	if (!inFile)
-		return false;
-	
-	inFile >> this->name;
-	if (this->ID == 2)
-	{	
-		if (!inFile)
-			return false;
-		inFile >> this->deskNumber;
-	}
-	else
-		this->deskNumber = -1;
-	
+	for (int i = 0; i < desks.size(); ++i)
+		if (!desks[i].taken)
+			return false; 
 	return true;
 }
 
-std::string Event::Get()
+bool InvalidOpenCloseTime(const std::string& currentLine)
 {
-	std::string out;	
-	out += this->time.Get();
-	out += ' ';
-	out += std::to_string(this->ID);
-	out += ' ';
-	out += this->name;
-	if (this->ID == 2 || this->ID == 12)
-	{
-		out += ' ';
-		out += std::to_string(this->deskNumber);
-	}
-	return out;
+	if (currentLine.length() < 11) 	    return true;
+	if (!std::isdigit(currentLine[0]))  return true;
+	if (!std::isdigit(currentLine[1]))  return true;
+	if (currentLine[2] != ':') 		    return true;
+	if (!std::isdigit(currentLine[3]))  return true;
+	if (!std::isdigit(currentLine[4]))  return true;
+	if (currentLine[5] != ' ') 		    return true;
+	if (!std::isdigit(currentLine[6]))  return true;
+	if (!std::isdigit(currentLine[7]))  return true;
+	if (currentLine[8] != ':') 		    return true;
+	if (!std::isdigit(currentLine[9]))  return true;
+	if (!std::isdigit(currentLine[10])) return true;
+	
+	if (currentLine[0] - '0' > 2)			    		       return true;
+	if (currentLine[0] - '0' == 2 && currentLine[1] - '0' > 3) return true;
+	if (currentLine[3] - '0' > 5)			   			       return true;
+	if (currentLine[6] - '0' > 2)			   			       return true;
+	if (currentLine[6] - '0' == 2 && currentLine[7] - '0' > 3) return true;
+	if (currentLine[9] - '0' > 5)			    		       return true;
+	return false;
+}
+
+bool InvalidEventTime(const std::string& currentLine)
+{
+	if (currentLine.length() < 6)  	    return true;
+	if (!std::isdigit(currentLine[0]))  return true;
+	if (!std::isdigit(currentLine[1]))  return true;
+	if (currentLine[2] != ':') 		    return true;
+	if (!std::isdigit(currentLine[3]))  return true;
+	if (!std::isdigit(currentLine[4]))  return true;
+	if (currentLine[5] != ' ') 		    return true;
+	
+	if (currentLine[0] - '0' > 2)			    		       return true;
+	if (currentLine[0] - '0' == 2 && currentLine[1] - '0' > 3) return true;
+	if (currentLine[3] - '0' > 5)							   return true;
+	return false;
 }
