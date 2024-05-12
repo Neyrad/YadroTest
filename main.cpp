@@ -38,7 +38,7 @@ public:
     }
 };
 bool InvalidOpenCloseTime(const std::string& currentLine);
-bool InvalidEventTime(const std::string& currentLine);
+bool InvalidEventTimeOrID(const std::string& currentLine);
 
 class Desk final
 {
@@ -79,7 +79,7 @@ public:
 	
 	Event(const std::string& currentLine, int nDesks)
 	{
-		if (InvalidEventTime(currentLine))
+		if (InvalidEventTimeOrID(currentLine))
 		{
 			std::cout << currentLine << std::endl;
 			abort();
@@ -87,15 +87,7 @@ public:
 		
 		std::istringstream iss(currentLine);
 		char delimiter;
-		iss >> this->time.hours >> delimiter >> this->time.minutes;
-		iss >> this->ID;
-		if (this->ID < 1 || this->ID > 4)
-		{
-			std::cout << currentLine << std::endl;
-			abort();
-		}
-		
-		iss >> this->name;
+		iss >> this->time.hours >> delimiter >> this->time.minutes >> this->ID >> this->name;
 		if (!this->name.length())
 		{
 			std::cout << currentLine << std::endl;
@@ -109,16 +101,23 @@ public:
 				abort();
 			}
 	
-		std::string deskNumberString;
-		iss >> deskNumberString;	
-		if (this->ID == 2)
-		{
-			if (!deskNumberString.length())
+		std::string DeskNumberString;
+		iss >> DeskNumberString;
+		for (char c: DeskNumberString)
+			if (!(c >= '0' && c <= '9' || c == ' '))
 			{
 				std::cout << currentLine << std::endl;
 				abort();
 			}
-			this->deskNumber = std::stoi(deskNumberString);
+		
+		if (this->ID == 2)
+		{
+			if (!DeskNumberString.length())
+			{
+				std::cout << currentLine << std::endl;
+				abort();
+			}
+			this->deskNumber = std::stoi(DeskNumberString);
 		}
 		else
 			this->deskNumber = -1;
@@ -128,7 +127,16 @@ public:
 		{
 			std::cout << currentLine << std::endl;
 			abort();
-		} 
+		}
+		
+		std::string Remainder;
+		iss >> Remainder;
+		for (char c: Remainder)
+			if (c != ' ')
+			{
+				std::cout << currentLine << std::endl;
+				abort();
+			}
 	}
 	
 	std::string Print()
@@ -160,7 +168,7 @@ int main(int argc, char* argv[])
 	if (argc < 2)
 	{
 		std::cout << "Usage: ./task test_file.txt" << std::endl;
-		return 1;
+		abort();
 	}
 	
 	const std::string Filename = argv[1];
@@ -171,21 +179,23 @@ int main(int argc, char* argv[])
 	if (InFile.fail())
 	{
 		std::cout << "Error opening file." << std::endl;
-		return 1;
+		abort();
 	}
 	
 	std::string CurrentLine;
 	std::getline(InFile, CurrentLine);
-	if (!std::isdigit(CurrentLine[0]))
-	{
-		std::cout << CurrentLine << std::endl;
-		return 1;
-	}
+	
+	for (char c: CurrentLine)
+		if (!(c >= '0' && c <= '9' || c == ' '))
+		{
+			std::cout << CurrentLine << std::endl;
+			abort();
+		}
 	int NDesks = std::stoi(CurrentLine);
 	if (NDesks <= 0)
 	{
 		std::cout << CurrentLine << std::endl;
-		return 1;
+		abort();
 	}
 	
 	std::vector<Desk> Desks(NDesks);
@@ -194,7 +204,7 @@ int main(int argc, char* argv[])
 	if (InvalidOpenCloseTime(CurrentLine))
 	{
 		std::cout << CurrentLine << std::endl;
-		return 1;
+		abort();
 	}
 	
 	int OpenHours    = (CurrentLine[0] - '0') * 10 + (CurrentLine[1] - '0');
@@ -208,25 +218,27 @@ int main(int argc, char* argv[])
 	if (CloseTime < OpenTime)
 	{
 		std::cout << CurrentLine << std::endl;
-		return 1;
+		abort();
 	}
 	
 	std::getline(InFile, CurrentLine);
-	if (!std::isdigit(CurrentLine[0]))
-	{
-		std::cout << CurrentLine << std::endl;
-		return 1;
-	}
+	for (char c: CurrentLine)
+		if (!(c >= '0' && c <= '9' || c == ' '))
+		{
+			std::cout << CurrentLine << std::endl;
+			abort();
+		}
 	int HourCost = std::stoi(CurrentLine);
 	if (HourCost <= 0)
 	{
 		std::cout << CurrentLine << std::endl;
-		return 1;
+		abort();
 	}
 	
 	std::cout << OpenTime.Print() << std::endl;
 	
 	std::vector<Event> Events;
+	Time LastEventTime = OpenTime;
 	while(true)
 	{
 		std::getline(InFile, CurrentLine);
@@ -254,6 +266,14 @@ int main(int argc, char* argv[])
 					Events.push_back(ErrorEvent);
 					error = true;
 				}
+				
+				if (CloseTime < CurrentEvent.time)
+				{
+					Event ErrorEvent(CurrentEvent.time, 13, "AlreadyClosed");
+					Events.push_back(ErrorEvent);
+					error = true;
+				}
+				
 				
 				if (!error)
 					ComputerClub.clients.insert(CurrentEvent.name);
@@ -343,7 +363,17 @@ int main(int argc, char* argv[])
 			}
 			default:
 				std::cout << "Error! Invalid Event ID" << std::endl;
-				return 1;
+				abort();
+		}
+		
+		if (!error)
+		{
+			if (CurrentEvent.time < LastEventTime)
+			{
+				std::cout << CurrentLine << std::endl;
+				abort();
+			}
+			LastEventTime = CurrentEvent.time;
 		}
 	}
 	
@@ -360,10 +390,8 @@ int main(int argc, char* argv[])
 	
 	std::cout << CloseTime.Print() << std::endl;	
 	
-	
 	for (int i = 0; i < Desks.size(); ++i)
 		std::cout << i + 1 << " " << Desks[i].money << " " << Desks[i].allUsageTime.Print() << std::endl;
-	
 	
 	InFile.close();
 }
@@ -400,18 +428,26 @@ bool InvalidOpenCloseTime(const std::string& currentLine)
 	return false;
 }
 
-bool InvalidEventTime(const std::string& currentLine)
+bool InvalidEventTimeOrID(const std::string& currentLine)
 {
-	if (currentLine.length() < 6)  	    return true;
+	if (currentLine.length() < 8)  	    return true;
 	if (!std::isdigit(currentLine[0]))  return true;
 	if (!std::isdigit(currentLine[1]))  return true;
 	if (currentLine[2] != ':') 		    return true;
 	if (!std::isdigit(currentLine[3]))  return true;
 	if (!std::isdigit(currentLine[4]))  return true;
 	if (currentLine[5] != ' ') 		    return true;
+	if (!std::isdigit(currentLine[6])) 	return true;
+	if (currentLine[7] != ' ') 		    return true;
 	
 	if (currentLine[0] - '0' > 2)			    		       return true;
 	if (currentLine[0] - '0' == 2 && currentLine[1] - '0' > 3) return true;
 	if (currentLine[3] - '0' > 5)							   return true;
+	
+	if (currentLine[6] - '0' < 1 || currentLine[6] - '0' > 4)
+	{
+		std::cout << currentLine << std::endl;
+		abort();
+	}
 	return false;
 }
