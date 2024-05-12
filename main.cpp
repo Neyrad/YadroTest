@@ -5,6 +5,20 @@
 #include <queue>
 #include <set>
 
+#define POISON_DESK_NUMBER -1
+
+enum
+{
+	IN_CLIENT_COMES   = 1,
+	IN_CLIENT_SITS	  = 2,
+	IN_CLIENT_WAITS   = 3,
+	IN_CLIENT_LEAVES  = 4,
+	
+	OUT_CLIENT_LEAVES = 11,
+	OUT_CLIENT_SITS   = 12,
+	OUT_ERROR		  = 13
+};
+
 class Time final
 {
 public:
@@ -49,14 +63,19 @@ public:
 	bool taken;
 	int money;
 	
-	Desk(const Time& startedUsingTime = Time(), const Time& allUsageTime = Time(), const std::string& client = "Empty", bool taken = false, int money = 0) :
-		startedUsingTime(startedUsingTime), allUsageTime(allUsageTime), client(client), taken(taken), money(money) {}
+	Desk(const Time& startedUsingTime = Time(), const Time& allUsageTime = Time(),
+		 const std::string& client = "Empty", bool taken = false, int money = 0) :
+			startedUsingTime(startedUsingTime), allUsageTime(allUsageTime),
+			client(client), taken(taken), money(money) {}
 	
 	void AddTime(const Time& currentSessionTime, int hourCost)
 	{	
-		int intAllUsageTime 	   =     this->allUsageTime.hours * 60 + 	 this->allUsageTime.minutes;
-		int intCurrentSessionTime  =     currentSessionTime.hours * 60 +     currentSessionTime.minutes;
-		int intStartedUsingTime    = this->startedUsingTime.hours * 60 + this->startedUsingTime.minutes;
+		int intAllUsageTime 	   =     this->allUsageTime.hours * 60
+									   + this->allUsageTime.minutes;
+		int intCurrentSessionTime  =     currentSessionTime.hours * 60
+									   + currentSessionTime.minutes;
+		int intStartedUsingTime    = this->startedUsingTime.hours * 60
+								   + this->startedUsingTime.minutes;
 		
 		this->money += ((intCurrentSessionTime - intStartedUsingTime) / 60 + 1) * hourCost;
 		intAllUsageTime += intCurrentSessionTime - intStartedUsingTime;
@@ -75,7 +94,9 @@ public:
 	std::string name;
 	int deskNumber;	
 	
-	Event(const Time& time = Time(), int ID = 0, const std::string& name = "Empty", int deskNumber = -1) : time(time), ID(ID), name(name), deskNumber(deskNumber) {}
+	Event(const Time& time = Time(), int ID = 0, const std::string& name = "Empty",
+		  int deskNumber = POISON_DESK_NUMBER) : 
+			time(time), ID(ID), name(name), deskNumber(deskNumber) {}
 	
 	Event(const std::string& currentLine, int nDesks)
 	{
@@ -87,7 +108,8 @@ public:
 		
 		std::istringstream iss(currentLine);
 		char delimiter;
-		iss >> this->time.hours >> delimiter >> this->time.minutes >> this->ID >> this->name;
+		iss >> this->time.hours >> delimiter >> this->time.minutes;
+		iss >> this->ID >> this->name;
 		if (!this->name.length())
 		{
 			std::cout << currentLine << std::endl;
@@ -95,7 +117,8 @@ public:
 		}
 		
 		for (char c: this->name)
-			if (!(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == ' ' || c == '-'))
+			if (!(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' ||
+				  c == ' ' || c == '-' || c == '_'))
 			{
 				std::cout << currentLine << std::endl;
 				abort();
@@ -110,7 +133,7 @@ public:
 				abort();
 			}
 		
-		if (this->ID == 2)
+		if (this->ID == IN_CLIENT_SITS)
 		{
 			if (!DeskNumberString.length())
 			{
@@ -120,10 +143,10 @@ public:
 			this->deskNumber = std::stoi(DeskNumberString);
 		}
 		else
-			this->deskNumber = -1;
+			this->deskNumber = POISON_DESK_NUMBER;
 		
-		
-		if (this->deskNumber < -1 || this->deskNumber > nDesks)
+		if ((this->deskNumber < 1 || this->deskNumber > nDesks) &&
+			 this->deskNumber != POISON_DESK_NUMBER)
 		{
 			std::cout << currentLine << std::endl;
 			abort();
@@ -147,7 +170,7 @@ public:
 		out += std::to_string(this->ID);
 		out += ' ';
 		out += this->name;
-		if (this->ID == 2 || this->ID == 12)
+		if (this->ID == IN_CLIENT_SITS || this->ID == OUT_CLIENT_SITS)
 		{
 			out += ' ';
 			out += std::to_string(this->deskNumber);
@@ -156,7 +179,7 @@ public:
 	}
 };
 
-class ComputerClub
+class ComputerClub final
 {
 public:
 	std::queue<std::string> waitingClients;
@@ -250,26 +273,26 @@ int main(int argc, char* argv[])
 		Events.push_back(CurrentEvent);
 		switch (CurrentEvent.ID)
 		{
-			case 1:
+			case IN_CLIENT_COMES:
 			{
 				auto search = ComputerClub.clients.find(CurrentEvent.name);
 				if (search != ComputerClub.clients.end())
 				{
-					Event ErrorEvent(CurrentEvent.time, 13, "YouShallNotPass");
+					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "YouShallNotPass");
 					Events.push_back(ErrorEvent);
 					error = true;
 					
 				}
 				if (CurrentEvent.time < OpenTime)
 				{
-					Event ErrorEvent(CurrentEvent.time, 13, "NotOpenYet");
+					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "NotOpenYet");
 					Events.push_back(ErrorEvent);
 					error = true;
 				}
 				
 				if (CloseTime < CurrentEvent.time)
 				{
-					Event ErrorEvent(CurrentEvent.time, 13, "AlreadyClosed");
+					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "AlreadyClosed");
 					Events.push_back(ErrorEvent);
 					error = true;
 				}
@@ -279,11 +302,11 @@ int main(int argc, char* argv[])
 					ComputerClub.clients.insert(CurrentEvent.name);
 				break;
 			}
-			case 2:
+			case IN_CLIENT_SITS:
 			{
 				if (Desks[CurrentEvent.deskNumber - 1].taken)
 				{
-					Event ErrorEvent(CurrentEvent.time, 13, "PlaceIsBusy");
+					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "PlaceIsBusy");
 					Events.push_back(ErrorEvent);
 					error = true;
 				}
@@ -291,7 +314,7 @@ int main(int argc, char* argv[])
 				auto search = ComputerClub.clients.find(CurrentEvent.name);
 				if (search == ComputerClub.clients.end())
 				{					
-					Event ErrorEvent(CurrentEvent.time, 13, "ClientUnknown");
+					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "ClientUnknown");
 					Events.push_back(ErrorEvent);
 					error = true;
 				}
@@ -311,29 +334,29 @@ int main(int argc, char* argv[])
 				}
 				break;
 			}
-			case 3:
+			case IN_CLIENT_WAITS:
 				if (!AllDesksTaken(Desks))
 				{
-					Event ErrorEvent(CurrentEvent.time, 13, "ICanWaitNoLonger");
+					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "ICanWaitNoLonger");
 					Events.push_back(ErrorEvent);
 					error = true;
 				}
 				if (ComputerClub.waitingClients.size() > NDesks)
 				{
 					ComputerClub.clients.erase(CurrentEvent.name);
-					Event LeavingEvent(CurrentEvent.time, 11, CurrentEvent.name);
+					Event LeavingEvent(CurrentEvent.time, OUT_CLIENT_LEAVES, CurrentEvent.name);
 					Events.push_back(LeavingEvent);
 					error = true;
 				}
 				if (!error)
 					ComputerClub.waitingClients.push(CurrentEvent.name);
 				break;
-			case 4:
+			case IN_CLIENT_LEAVES:
 			{
 				auto search = ComputerClub.clients.find(CurrentEvent.name);
 				if (search == ComputerClub.clients.end())
 				{					
-					Event ErrorEvent(CurrentEvent.time, 13, "ClientUnknown");
+					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "ClientUnknown");
 					Events.push_back(ErrorEvent);
 					error = true;
 				}
@@ -349,7 +372,8 @@ int main(int argc, char* argv[])
 							{
 								Desks[i].client = ComputerClub.waitingClients.front();
 								ComputerClub.waitingClients.pop();
-								Event TakingDeskEvent(CurrentEvent.time, 12, Desks[i].client, i + 1);
+								Event TakingDeskEvent(CurrentEvent.time, OUT_CLIENT_SITS, 
+													  Desks[i].client, i + 1);
 								Events.push_back(TakingDeskEvent);
 								Desks[i].taken = true;
 								Desks[i].startedUsingTime = CurrentEvent.time;
@@ -380,7 +404,7 @@ int main(int argc, char* argv[])
 	for (int i = 0; i < Desks.size(); ++i)
 		if (Desks[i].taken)
 		{
-			Event LeavingEvent(CloseTime, 11, Desks[i].client);
+			Event LeavingEvent(CloseTime, OUT_CLIENT_LEAVES, Desks[i].client);
 			Events.push_back(LeavingEvent);
 			Desks[i].AddTime(CloseTime, HourCost);
 		}
@@ -391,7 +415,8 @@ int main(int argc, char* argv[])
 	std::cout << CloseTime.Print() << std::endl;	
 	
 	for (int i = 0; i < Desks.size(); ++i)
-		std::cout << i + 1 << " " << Desks[i].money << " " << Desks[i].allUsageTime.Print() << std::endl;
+		std::cout << i + 1 << " " << Desks[i].money
+						   << " " << Desks[i].allUsageTime.Print() << std::endl;
 	
 	InFile.close();
 }
@@ -444,7 +469,9 @@ bool InvalidEventTimeOrID(const std::string& currentLine)
 	if (currentLine[0] - '0' == 2 && currentLine[1] - '0' > 3) return true;
 	if (currentLine[3] - '0' > 5)							   return true;
 	
-	if (currentLine[6] - '0' < 1 || currentLine[6] - '0' > 4)
+	int EventID = currentLine[6] - '0';
+	if (EventID != IN_CLIENT_COMES && EventID != IN_CLIENT_SITS && 
+		EventID != IN_CLIENT_WAITS && EventID != IN_CLIENT_LEAVES)
 	{
 		std::cout << currentLine << std::endl;
 		abort();
