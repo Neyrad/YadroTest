@@ -7,8 +7,10 @@
 
 #define POISON_DESK_NUMBER -1
 
-enum
+enum EventID
 {
+	NONE			  = -1,
+	
 	IN_CLIENT_COMES   = 1,
 	IN_CLIENT_SITS	  = 2,
 	IN_CLIENT_WAITS   = 3,
@@ -19,6 +21,8 @@ enum
 	OUT_ERROR		  = 13
 };
 
+void AssertForInput(bool condition, const std::string& currentLine);
+
 class Time final
 {
 public:
@@ -27,7 +31,7 @@ public:
 	
 	Time(int hours = 0, int minutes = 0) : hours(hours), minutes(minutes) {}
 	
-	std::string Print()
+	std::string Print() const
 	{
 		std::string out;	
 		if (this->hours < 10)
@@ -51,8 +55,8 @@ public:
 		return false;
     }
 };
-bool InvalidOpenCloseTime(const std::string& currentLine);
-bool InvalidEventTimeOrID(const std::string& currentLine);
+bool ValidOpenCloseTime(const std::string& currentLine);
+bool ValidEventTimeOrID(const std::string& currentLine);
 
 class Desk final
 {
@@ -90,79 +94,56 @@ class Event final
 {
 public:
 	Time time;
-	int ID;
+	EventID ID;
 	std::string name;
 	int deskNumber;	
 	
-	Event(const Time& time = Time(), int ID = 0, const std::string& name = "Empty",
+	Event(const Time& time = Time(), EventID ID = NONE, const std::string& name = "Empty",
 		  int deskNumber = POISON_DESK_NUMBER) : 
 			time(time), ID(ID), name(name), deskNumber(deskNumber) {}
 	
 	Event(const std::string& currentLine, int nDesks)
 	{
-		if (InvalidEventTimeOrID(currentLine))
-		{
-			std::cout << currentLine << std::endl;
-			abort();
-		}
+		AssertForInput(ValidEventTimeOrID(currentLine), currentLine);
 		
 		std::istringstream iss(currentLine);
 		char delimiter;
 		iss >> this->time.hours >> delimiter >> this->time.minutes;
-		iss >> this->ID >> this->name;
-		if (!this->name.length())
-		{
-			std::cout << currentLine << std::endl;
-			abort();
-		}
+		
+		int IntID;
+		iss >> IntID;
+		this->ID = (EventID)IntID;
+		
+		iss >> this->name;
+		AssertForInput(!this->name.empty(), currentLine);
 		
 		for (char c: this->name)
-			if (!(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' ||
-				  c == ' ' || c == '-' || c == '_'))
-			{
-				std::cout << currentLine << std::endl;
-				abort();
-			}
+			AssertForInput(std::islower(c) || std::isdigit(c) ||
+						   std::isspace(c) || c == '-' || c == '_', currentLine);
 	
 		std::string DeskNumberString;
 		iss >> DeskNumberString;
 		for (char c: DeskNumberString)
-			if (!(c >= '0' && c <= '9' || c == ' '))
-			{
-				std::cout << currentLine << std::endl;
-				abort();
-			}
+			AssertForInput(std::isdigit(c) || std::isspace(c), currentLine);
 		
 		if (this->ID == IN_CLIENT_SITS)
 		{
-			if (!DeskNumberString.length())
-			{
-				std::cout << currentLine << std::endl;
-				abort();
-			}
+			AssertForInput(!DeskNumberString.empty(), currentLine);
 			this->deskNumber = std::stoi(DeskNumberString);
 		}
 		else
 			this->deskNumber = POISON_DESK_NUMBER;
 		
-		if ((this->deskNumber < 1 || this->deskNumber > nDesks) &&
-			 this->deskNumber != POISON_DESK_NUMBER)
-		{
-			std::cout << currentLine << std::endl;
-			abort();
-		}
+		AssertForInput(this->deskNumber == POISON_DESK_NUMBER || 
+					   this->deskNumber > 0 && this->deskNumber <= nDesks, currentLine);
 		
 		std::string Remainder;
 		iss >> Remainder;
 		for (char c: Remainder)
-			if (c != ' ')
-			{
-				std::cout << currentLine << std::endl;
-				abort();
-			}
+			AssertForInput(std::isspace(c), currentLine);
 	}
 	
-	std::string Print()
+	std::string Print() const
 	{
 		std::string out;	
 		out += this->time.Print();
@@ -179,246 +160,121 @@ public:
 	}
 };
 
-class ComputerClub final
+struct ComputerClub final
 {
-public:
 	std::queue<std::string> waitingClients;
 	std::set<std::string> 	clients;
 };
 
+struct WorkingHours final
+{
+	Time openTime;
+	Time closeTime;
+};
+
+std::ifstream GetInputFile(int argc, char* path);
+
+void AddOuputEvents(std::ifstream& inFile, int nDesks, const WorkingHours& workingHours, int hourCost);
+
+WorkingHours GetWorkingHours(std::ifstream& inFile);
+
+int GetNumber(std::ifstream& inFile);
+
+void HandleClientComes(std::vector<Event>& events, const Event& currentEvent,
+					   ComputerClub& computerClub, const WorkingHours& workingHours,
+					   bool& error);
+					   
+void HandleClientSits(std::vector<Event>& events, const Event& currentEvent,
+					  ComputerClub& computerClub, std::vector<Desk>& desks,
+					  bool& error);
+					  
+void HandleClientWaits(std::vector<Event>& events, const Event& currentEvent,
+					   ComputerClub& computerClub, std::vector<Desk>& desks,
+					   bool& error, int nDesks);
+
+void HandleClientLeaves(std::vector<Event>& events, const Event& currentEvent,
+					    ComputerClub& computerClub, std::vector<Desk>& desks,
+						int hourCost, bool& error);
+
+void KickOutRemainingClients(std::vector<Event>& events,
+							 std::vector<Desk>& desks,
+							 const WorkingHours& workingHours, int hourCost);
+
+void PrintOutputToConsole(const std::vector<Event>& events,
+						  const std::vector<Desk>& desks,
+						  const WorkingHours& workingHours);
+
 int main(int argc, char* argv[])
+{
+	std::ifstream InFile = GetInputFile(argc, argv[1]);
+	
+	int NDesks				  = GetNumber(InFile);
+	WorkingHours WorkingHours = GetWorkingHours(InFile);
+	int HourCost 			  = GetNumber(InFile);
+	
+	AddOuputEvents(InFile, NDesks, WorkingHours, HourCost);
+	InFile.close();
+}
+
+std::ifstream GetInputFile(int argc, char* path)
 {
 	if (argc < 2)
 	{
 		std::cout << "Usage: ./task test_file.txt" << std::endl;
-		abort();
+		exit(1);
 	}
-	
-	const std::string Filename = argv[1];
-	ComputerClub ComputerClub;
-	std::ifstream InFile;
-	InFile.open(Filename);
-	
+	std::ifstream InFile(path);
 	if (InFile.fail())
 	{
 		std::cout << "Error opening file." << std::endl;
-		abort();
+		exit(1);
 	}
-	
-	std::string CurrentLine;
-	std::getline(InFile, CurrentLine);
-	
-	for (char c: CurrentLine)
-		if (!(c >= '0' && c <= '9' || c == ' '))
-		{
-			std::cout << CurrentLine << std::endl;
-			abort();
-		}
-	int NDesks = std::stoi(CurrentLine);
-	if (NDesks <= 0)
-	{
-		std::cout << CurrentLine << std::endl;
-		abort();
-	}
-	
-	std::vector<Desk> Desks(NDesks);
+	return InFile;
+}
 
-	std::getline(InFile, CurrentLine);
-	if (InvalidOpenCloseTime(CurrentLine))
-	{
-		std::cout << CurrentLine << std::endl;
-		abort();
-	}
-	
-	int OpenHours    = (CurrentLine[0] - '0') * 10 + (CurrentLine[1] - '0');
-	int OpenMinutes  = (CurrentLine[3] - '0') * 10 + (CurrentLine[4] - '0');
-	int CloseHours   = (CurrentLine[6] - '0') * 10 + (CurrentLine[7] - '0');
-	int CloseMinutes = (CurrentLine[9] - '0') * 10 + (CurrentLine[10] - '0');
-	
-	Time OpenTime(OpenHours, OpenMinutes);
-	Time CloseTime(CloseHours, CloseMinutes);
-	
-	if (CloseTime < OpenTime)
-	{
-		std::cout << CurrentLine << std::endl;
-		abort();
-	}
-	
-	std::getline(InFile, CurrentLine);
-	for (char c: CurrentLine)
-		if (!(c >= '0' && c <= '9' || c == ' '))
-		{
-			std::cout << CurrentLine << std::endl;
-			abort();
-		}
-	int HourCost = std::stoi(CurrentLine);
-	if (HourCost <= 0)
-	{
-		std::cout << CurrentLine << std::endl;
-		abort();
-	}
-	
-	std::cout << OpenTime.Print() << std::endl;
-	
+void AddOuputEvents(std::ifstream& inFile, int nDesks, const WorkingHours& workingHours, int hourCost)
+{
+	ComputerClub ComputerClub;
 	std::vector<Event> Events;
-	Time LastEventTime = OpenTime;
+	std::vector<Desk> Desks(nDesks);
+	Time LastEventTime = workingHours.openTime;
 	while(true)
 	{
-		std::getline(InFile, CurrentLine);
-		if (!CurrentLine.length())
+		std::string CurrentLine;
+		std::getline(inFile, CurrentLine);
+		if (CurrentLine.empty())
 			break;
 		
-		Event CurrentEvent(CurrentLine, NDesks);
-		bool error = false;
+		Event CurrentEvent(CurrentLine, nDesks);
 		Events.push_back(CurrentEvent);
+		bool error = false;
 		switch (CurrentEvent.ID)
 		{
 			case IN_CLIENT_COMES:
-			{
-				auto search = ComputerClub.clients.find(CurrentEvent.name);
-				if (search != ComputerClub.clients.end())
-				{
-					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "YouShallNotPass");
-					Events.push_back(ErrorEvent);
-					error = true;
-					
-				}
-				if (CurrentEvent.time < OpenTime)
-				{
-					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "NotOpenYet");
-					Events.push_back(ErrorEvent);
-					error = true;
-				}
-				
-				if (CloseTime < CurrentEvent.time)
-				{
-					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "AlreadyClosed");
-					Events.push_back(ErrorEvent);
-					error = true;
-				}
-				
-				
-				if (!error)
-					ComputerClub.clients.insert(CurrentEvent.name);
+				HandleClientComes(Events, CurrentEvent, ComputerClub, workingHours, error);
 				break;
-			}
 			case IN_CLIENT_SITS:
-			{
-				if (Desks[CurrentEvent.deskNumber - 1].taken)
-				{
-					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "PlaceIsBusy");
-					Events.push_back(ErrorEvent);
-					error = true;
-				}
-				
-				auto search = ComputerClub.clients.find(CurrentEvent.name);
-				if (search == ComputerClub.clients.end())
-				{					
-					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "ClientUnknown");
-					Events.push_back(ErrorEvent);
-					error = true;
-				}
-				
-				for (int i = 0; i < Desks.size(); ++i)
-					if (Desks[i].client == CurrentEvent.name)
-					{
-						Desks[i].client = "Empty";
-						break;
-					}
-				
-				if (!error)
-				{
-					Desks[CurrentEvent.deskNumber - 1].taken 			= true;
-					Desks[CurrentEvent.deskNumber - 1].startedUsingTime = CurrentEvent.time;
-					Desks[CurrentEvent.deskNumber - 1].client 			= CurrentEvent.name;
-				}
+				HandleClientSits(Events, CurrentEvent, ComputerClub, Desks, error);
 				break;
-			}
 			case IN_CLIENT_WAITS:
-				if (!AllDesksTaken(Desks))
-				{
-					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "ICanWaitNoLonger");
-					Events.push_back(ErrorEvent);
-					error = true;
-				}
-				if (ComputerClub.waitingClients.size() > NDesks)
-				{
-					ComputerClub.clients.erase(CurrentEvent.name);
-					Event LeavingEvent(CurrentEvent.time, OUT_CLIENT_LEAVES, CurrentEvent.name);
-					Events.push_back(LeavingEvent);
-					error = true;
-				}
-				if (!error)
-					ComputerClub.waitingClients.push(CurrentEvent.name);
+				HandleClientWaits(Events, CurrentEvent, ComputerClub, Desks, error, nDesks);
 				break;
 			case IN_CLIENT_LEAVES:
-			{
-				auto search = ComputerClub.clients.find(CurrentEvent.name);
-				if (search == ComputerClub.clients.end())
-				{					
-					Event ErrorEvent(CurrentEvent.time, OUT_ERROR, "ClientUnknown");
-					Events.push_back(ErrorEvent);
-					error = true;
-				}
-				
-				if (!error)
-				{
-					for (int i = 0; i < Desks.size(); ++i)
-						if (Desks[i].client == CurrentEvent.name)
-						{
-							Desks[i].taken = false;
-							Desks[i].AddTime(CurrentEvent.time, HourCost);
-							if (ComputerClub.waitingClients.size())
-							{
-								Desks[i].client = ComputerClub.waitingClients.front();
-								ComputerClub.waitingClients.pop();
-								Event TakingDeskEvent(CurrentEvent.time, OUT_CLIENT_SITS, 
-													  Desks[i].client, i + 1);
-								Events.push_back(TakingDeskEvent);
-								Desks[i].taken = true;
-								Desks[i].startedUsingTime = CurrentEvent.time;
-							}
-							else
-								Desks[i].client = "Empty";
-							break;
-						}
-				}
+				HandleClientLeaves(Events, CurrentEvent, ComputerClub, Desks, hourCost, error);
 				break;
-			}
 			default:
 				std::cout << "Error! Invalid Event ID" << std::endl;
-				abort();
+				exit(1);
 		}
 		
 		if (!error)
 		{
-			if (CurrentEvent.time < LastEventTime)
-			{
-				std::cout << CurrentLine << std::endl;
-				abort();
-			}
+			AssertForInput(!(CurrentEvent.time < LastEventTime), CurrentLine);
 			LastEventTime = CurrentEvent.time;
 		}
 	}
-	
-	for (int i = 0; i < Desks.size(); ++i)
-		if (Desks[i].taken)
-		{
-			Event LeavingEvent(CloseTime, OUT_CLIENT_LEAVES, Desks[i].client);
-			Events.push_back(LeavingEvent);
-			Desks[i].AddTime(CloseTime, HourCost);
-		}
-	
-	for (Event CurrentEvent: Events)
-		std::cout << CurrentEvent.Print() << std::endl;
-	
-	std::cout << CloseTime.Print() << std::endl;	
-	
-	for (int i = 0; i < Desks.size(); ++i)
-		std::cout << i + 1 << " " << Desks[i].money
-						   << " " << Desks[i].allUsageTime.Print() << std::endl;
-	
-	InFile.close();
+	KickOutRemainingClients(Events, Desks, workingHours, hourCost);
+	PrintOutputToConsole(Events, Desks, workingHours);
 }
 
 bool AllDesksTaken(const std::vector<Desk>& desks)
@@ -429,52 +285,236 @@ bool AllDesksTaken(const std::vector<Desk>& desks)
 	return true;
 }
 
-bool InvalidOpenCloseTime(const std::string& currentLine)
+WorkingHours GetWorkingHours(std::ifstream& inFile)
 {
-	if (currentLine.length() < 11) 	    return true;
-	if (!std::isdigit(currentLine[0]))  return true;
-	if (!std::isdigit(currentLine[1]))  return true;
-	if (currentLine[2] != ':') 		    return true;
-	if (!std::isdigit(currentLine[3]))  return true;
-	if (!std::isdigit(currentLine[4]))  return true;
-	if (currentLine[5] != ' ') 		    return true;
-	if (!std::isdigit(currentLine[6]))  return true;
-	if (!std::isdigit(currentLine[7]))  return true;
-	if (currentLine[8] != ':') 		    return true;
-	if (!std::isdigit(currentLine[9]))  return true;
-	if (!std::isdigit(currentLine[10])) return true;
-	
-	if (currentLine[0] - '0' > 2)			    		       return true;
-	if (currentLine[0] - '0' == 2 && currentLine[1] - '0' > 3) return true;
-	if (currentLine[3] - '0' > 5)			   			       return true;
-	if (currentLine[6] - '0' > 2)			   			       return true;
-	if (currentLine[6] - '0' == 2 && currentLine[7] - '0' > 3) return true;
-	if (currentLine[9] - '0' > 5)			    		       return true;
-	return false;
+	std::string CurrentLine;
+	std::getline(inFile, CurrentLine);
+	AssertForInput(ValidOpenCloseTime(CurrentLine), CurrentLine);
+	WorkingHours Temp;
+	Temp.openTime.hours    = (CurrentLine[0] - '0') * 10 + (CurrentLine[1] - '0');
+	Temp.openTime.minutes  = (CurrentLine[3] - '0') * 10 + (CurrentLine[4] - '0');
+	Temp.closeTime.hours   = (CurrentLine[6] - '0') * 10 + (CurrentLine[7] - '0');
+	Temp.closeTime.minutes = (CurrentLine[9] - '0') * 10 + (CurrentLine[10] - '0');
+	AssertForInput(Temp.openTime < Temp.closeTime, CurrentLine);
+	return Temp;
 }
 
-bool InvalidEventTimeOrID(const std::string& currentLine)
+void AssertForInput(bool condition, const std::string& currentLine)
 {
-	if (currentLine.length() < 8)  	    return true;
-	if (!std::isdigit(currentLine[0]))  return true;
-	if (!std::isdigit(currentLine[1]))  return true;
-	if (currentLine[2] != ':') 		    return true;
-	if (!std::isdigit(currentLine[3]))  return true;
-	if (!std::isdigit(currentLine[4]))  return true;
-	if (currentLine[5] != ' ') 		    return true;
-	if (!std::isdigit(currentLine[6])) 	return true;
-	if (currentLine[7] != ' ') 		    return true;
-	
-	if (currentLine[0] - '0' > 2)			    		       return true;
-	if (currentLine[0] - '0' == 2 && currentLine[1] - '0' > 3) return true;
-	if (currentLine[3] - '0' > 5)							   return true;
-	
-	int EventID = currentLine[6] - '0';
-	if (EventID != IN_CLIENT_COMES && EventID != IN_CLIENT_SITS && 
-		EventID != IN_CLIENT_WAITS && EventID != IN_CLIENT_LEAVES)
+	if (!condition)
 	{
 		std::cout << currentLine << std::endl;
-		abort();
+		exit(1);
 	}
-	return false;
+}
+
+int GetNumber(std::ifstream& inFile)
+{
+	std::string CurrentLine;
+	std::getline(inFile, CurrentLine);
+	for (char c: CurrentLine)
+		AssertForInput(std::isdigit(c) || std::isspace(c), CurrentLine);
+	int Number = std::stoi(CurrentLine);
+	AssertForInput(Number > 0, CurrentLine);
+	return Number;
+}
+
+void HandleClientComes(std::vector<Event>& events, const Event& currentEvent,
+					   ComputerClub& computerClub, const WorkingHours& workingHours,
+					   bool& error)
+{
+	auto Search = computerClub.clients.find(currentEvent.name);
+	if (Search != computerClub.clients.end())
+	{
+		Event ErrorEvent(currentEvent.time, OUT_ERROR, "YouShallNotPass");
+		events.push_back(ErrorEvent);
+		error = true;	
+	}
+	if (currentEvent.time < workingHours.openTime)
+	{
+		Event ErrorEvent(currentEvent.time, OUT_ERROR, "NotOpenYet");
+		events.push_back(ErrorEvent);
+		error = true;
+	}		
+	if (workingHours.closeTime < currentEvent.time)
+	{
+		Event ErrorEvent(currentEvent.time, OUT_ERROR, "AlreadyClosed");
+		events.push_back(ErrorEvent);
+		error = true;
+	}
+	
+	if (!error)
+		computerClub.clients.insert(currentEvent.name);
+}
+
+void HandleClientSits(std::vector<Event>& events, const Event& currentEvent,
+					  ComputerClub& computerClub, std::vector<Desk>& desks,
+					  bool& error)
+{
+	if (desks[currentEvent.deskNumber - 1].taken)
+	{
+		Event ErrorEvent(currentEvent.time, OUT_ERROR, "PlaceIsBusy");
+		events.push_back(ErrorEvent);
+		error = true;
+	}
+				
+	auto search = computerClub.clients.find(currentEvent.name);
+	if (search == computerClub.clients.end())
+	{					
+		Event ErrorEvent(currentEvent.time, OUT_ERROR, "ClientUnknown");
+		events.push_back(ErrorEvent);
+		error = true;
+	}
+				
+	for (int i = 0; i < desks.size(); ++i)
+		if (desks[i].client == currentEvent.name)
+		{
+			desks[i].taken  = false;
+			desks[i].client = "Empty";
+			break;
+		}
+				
+	if (!error)
+	{
+		desks[currentEvent.deskNumber - 1].taken 			= true;
+		desks[currentEvent.deskNumber - 1].startedUsingTime = currentEvent.time;
+		desks[currentEvent.deskNumber - 1].client 			= currentEvent.name;
+	}
+}
+
+void HandleClientWaits(std::vector<Event>& events, const Event& currentEvent,
+					   ComputerClub& computerClub, std::vector<Desk>& desks,
+					   bool& error, int nDesks)
+{
+	if (!AllDesksTaken(desks))
+	{
+		Event ErrorEvent(currentEvent.time, OUT_ERROR, "ICanWaitNoLonger");
+		events.push_back(ErrorEvent);
+		error = true;
+	}
+	
+	if (computerClub.waitingClients.size() > nDesks)
+	{
+		computerClub.clients.erase(currentEvent.name);
+		Event LeavingEvent(currentEvent.time, OUT_CLIENT_LEAVES, currentEvent.name);
+		events.push_back(LeavingEvent);
+		error = true;
+	}
+	
+	if (!error)
+		computerClub.waitingClients.push(currentEvent.name);
+}
+
+void HandleClientLeaves(std::vector<Event>& events, const Event& currentEvent,
+					    ComputerClub& computerClub, std::vector<Desk>& desks,
+						int hourCost, bool& error)
+{
+	auto search = computerClub.clients.find(currentEvent.name);
+	if (search == computerClub.clients.end())
+	{					
+		Event ErrorEvent(currentEvent.time, OUT_ERROR, "ClientUnknown");
+		events.push_back(ErrorEvent);
+		error = true;
+	}
+				
+	if (!error)
+	{
+		for (int i = 0; i < desks.size(); ++i)
+			if (desks[i].client == currentEvent.name)
+			{
+				desks[i].taken = false;
+				desks[i].AddTime(currentEvent.time, hourCost);
+				if (computerClub.waitingClients.size())
+				{
+					desks[i].client = computerClub.waitingClients.front();
+					computerClub.waitingClients.pop();
+					Event TakingDeskEvent(currentEvent.time, OUT_CLIENT_SITS, 
+										  desks[i].client, i + 1);
+					events.push_back(TakingDeskEvent);
+					desks[i].taken = true;
+					desks[i].startedUsingTime = currentEvent.time;
+				}
+				else
+					desks[i].client = "Empty";
+				break;
+			}
+	}
+} 
+
+void KickOutRemainingClients(std::vector<Event>& events,
+							 std::vector<Desk>& desks,
+							 const WorkingHours& workingHours, int hourCost)
+{
+	for (int i = 0; i < desks.size(); ++i)
+		if (desks[i].taken)
+		{
+			Event LeavingEvent(workingHours.closeTime, OUT_CLIENT_LEAVES, desks[i].client);
+			events.push_back(LeavingEvent);
+			desks[i].AddTime(workingHours.closeTime, hourCost);
+		}
+}
+
+void PrintOutputToConsole(const std::vector<Event>& events,
+						  const std::vector<Desk>& desks,
+						  const WorkingHours& workingHours)
+{
+	std::cout << workingHours.openTime.Print() << std::endl;
+	
+	for (Event CurrentEvent: events)
+		std::cout << CurrentEvent.Print() << std::endl;
+	
+	std::cout << workingHours.closeTime.Print() << std::endl;	
+	
+	for (int i = 0; i < desks.size(); ++i)
+		std::cout << i + 1 << " " << desks[i].money
+						   << " " << desks[i].allUsageTime.Print() << std::endl;
+}
+
+bool ValidOpenCloseTime(const std::string& currentLine)
+{
+	const std::string format = "XX:XX YY:YY";
+	if (currentLine.length() < format.length()) return false;
+	if (!std::isdigit(currentLine[0])) 		    return false;
+	if (!std::isdigit(currentLine[1])) 		    return false;
+	if (currentLine[2] != ':') 		  		    return false;
+	if (!std::isdigit(currentLine[3]))  		return false;
+	if (!std::isdigit(currentLine[4]))  		return false;
+	if (currentLine[5] != ' ') 		    		return false;
+	if (!std::isdigit(currentLine[6]))  		return false;
+	if (!std::isdigit(currentLine[7]))  		return false;
+	if (currentLine[8] != ':') 		    		return false;
+	if (!std::isdigit(currentLine[9]))  		return false;
+	if (!std::isdigit(currentLine[10])) 		return false;
+	
+	if (currentLine[0] - '0' > 2)			    		       return false;
+	if (currentLine[0] - '0' == 2 && currentLine[1] - '0' > 3) return false;
+	if (currentLine[3] - '0' > 5)			   			       return false;
+	if (currentLine[6] - '0' > 2)			   			       return false;
+	if (currentLine[6] - '0' == 2 && currentLine[7] - '0' > 3) return false;
+	if (currentLine[9] - '0' > 5)			    		       return false;
+	return true;
+}
+
+bool ValidEventTimeOrID(const std::string& currentLine)
+{
+	const std::string format = "XX:XX Y ";
+	if (currentLine.length() < format.length()) return false;
+	if (!std::isdigit(currentLine[0]))  		return false;
+	if (!std::isdigit(currentLine[1]))  		return false;
+	if (currentLine[2] != ':') 		    		return false;
+	if (!std::isdigit(currentLine[3]))  		return false;
+	if (!std::isdigit(currentLine[4]))  		return false;
+	if (currentLine[5] != ' ') 		    		return false;
+	if (!std::isdigit(currentLine[6])) 			return false;
+	if (currentLine[7] != ' ') 		    		return false;
+	
+	if (currentLine[0] - '0' > 2)			    		       return false;
+	if (currentLine[0] - '0' == 2 && currentLine[1] - '0' > 3) return false;
+	if (currentLine[3] - '0' > 5)							   return false;
+	
+	int ThisEventID = currentLine[6] - '0';
+	AssertForInput(ThisEventID == IN_CLIENT_COMES || ThisEventID == IN_CLIENT_SITS || 
+				   ThisEventID == IN_CLIENT_WAITS || ThisEventID == IN_CLIENT_LEAVES, currentLine);
+
+	return true;
 }
