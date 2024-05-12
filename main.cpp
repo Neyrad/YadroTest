@@ -56,7 +56,7 @@ public:
     }
 };
 bool ValidOpenCloseTime(const std::string& currentLine);
-bool ValidEventTimeOrID(const std::string& currentLine);
+bool ValidEventTimeAndID(const std::string& currentLine);
 
 class Desk final
 {
@@ -104,7 +104,7 @@ public:
 	
 	Event(const std::string& currentLine, int nDesks)
 	{
-		AssertForInput(ValidEventTimeOrID(currentLine), currentLine);
+		AssertForInput(ValidEventTimeAndID(currentLine), currentLine);
 		
 		std::istringstream iss(currentLine);
 		char delimiter;
@@ -495,7 +495,7 @@ bool ValidOpenCloseTime(const std::string& currentLine)
 	return true;
 }
 
-bool ValidEventTimeOrID(const std::string& currentLine)
+bool ValidEventTimeAndID(const std::string& currentLine)
 {
 	const std::string format = "XX:XX Y ";
 	if (currentLine.length() < format.length()) return false;
