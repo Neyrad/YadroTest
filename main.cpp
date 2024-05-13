@@ -44,6 +44,18 @@ public:
 	friend std::ostream& operator<<(std::ostream& os, const Time& time);
 };
 
+std::ostream& operator<<(std::ostream& os, const Time& time)
+{
+	if (time.hours < 10)
+		os << '0';
+	os << time.hours << ':';
+	
+	if (time.minutes < 10)
+		os << '0';
+	os << time.minutes;
+	return os;
+}
+
 int GetDigit(char c);
 bool IsTime(const std::string& str);
 Time GetTime(const std::string& str, const std::string& currentLine);
@@ -143,18 +155,6 @@ public:
 	
 	friend std::ostream& operator<<(std::ostream& os, const Event& event);
 };
-
-std::ostream& operator<<(std::ostream& os, const Time& time)
-{
-	if (time.hours < 10)
-		os << '0';
-	os << time.hours << ':';
-	
-	if (time.minutes < 10)
-		os << '0';
-	os << time.minutes;
-	return os;
-}
 
 std::ostream& operator<<(std::ostream& os, const Event& event)
 {	
@@ -390,7 +390,7 @@ void ComputerClub::HandleClientLeaves(const Event& currentEvent)
 	if (!this->error)
 	{
 		auto search = std::find_if(this->desks.begin(), this->desks.end(),
-								  [currentEvent](Desk d) {return d.client == currentEvent.name;});
+								  [currentEvent](Desk leavingDesk) {return leavingDesk.client == currentEvent.name;});
 								
         int num = std::distance(this->desks.begin(), search);
         Desk& Desk = this->desks[num];
